@@ -1,7 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>실시간 발표 부저 System</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
     body { font-family: 'Apple SD Gothic Neo', Arial, sans-serif; text-align: center; padding: 20px; background: #f4f4f9; }
@@ -113,11 +115,29 @@
   </div>
 
   <script>
+    // ⚠️ 아래 URL을 본인의 Apps Script 배포 URL로 변경하세요.
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx...YOUR_DEPLOYMENT_ID.../exec";
+
     let myName = "";
     let isTeacher = false;
     let timer = null;
     let currentInterval = 2500;
     let hasBuzzedCurrentQuiz = false;
+
+    // GitHub Pages용 공통 API 통신 함수
+    function callApi(action, data = {}) {
+      const payload = { action: action, data: data };
+      return fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      })
+      .then(res => res.json())
+      .catch(err => {
+        console.error("API Error:", err);
+      });
+    }
 
     function login() {
       myName = document.getElementById('nickname').value.trim();
@@ -129,7 +149,9 @@
       document.getElementById('login-sec').style.display = 'none';
 
       // 유저 등록 및 대기실 상태 가져오기
-      google.script.run.withSuccessHandler(render).joinUser(myName);
+      callApi('joinUser', { nickname: myName }).then(state => {
+        if (state) render(state);
+      });
       startPolling(800);
     }
 
@@ -140,10 +162,14 @@
     }
 
     function fetchState() {
-      google.script.run.withSuccessHandler(render).getState();
+      callApi('getState').then(state => {
+        if (state) render(state);
+      });
     }
 
     function render(state) {
+      if (!state) return;
+
       // 1. 수업 종료 처리
       if (state.status === 'END') {
         if (timer) clearInterval(timer);
@@ -161,10 +187,11 @@
           document.getElementById('teacher-start-ctrl').style.display = 'block';
         }
 
-        document.getElementById('user-count').innerText = state.users.length;
+        const users = state.users || [];
+        document.getElementById('user-count').innerText = users.length;
         const userListDiv = document.getElementById('user-list');
         userListDiv.innerHTML = '';
-        state.users.forEach(u => {
+        users.forEach(u => {
           userListDiv.innerHTML += `<span class="user-tag">👤 ${u}</span>`;
         });
         return;
@@ -201,13 +228,13 @@
         if (!isTeacher) buzzBtn.disabled = true;
         hasBuzzedCurrentQuiz = false;
         
-        // 반응 속도 향상을 위해 대기 상태 폴링 간격을 1초(1000ms)로 단축
         if (currentInterval !== 1000) startPolling(1000);
       }
 
       const tbody = document.getElementById('buzz-list');
       tbody.innerHTML = '';
-      state.buzzes.forEach((b, idx) => {
+      const buzzes = state.buzzes || [];
+      buzzes.forEach((b, idx) => {
         let actionBtns = '';
         if (isTeacher) {
           actionBtns = `<button class="btn-pass" onclick="judge(${idx}, 'PASS')">PASS</button>
@@ -229,44 +256,43 @@
     }
 
     function startLesson() {
-      google.script.run.withSuccessHandler(render).startLesson();
+      callApi('startLesson').then(render);
     }
 
     function openBuzzer() { 
       const banner = document.getElementById('status-banner');
       banner.className = "status-banner status-active";
       banner.innerHTML = "🔔 부저 오픈! (전송 중...)";
-      google.script.run.withSuccessHandler(render).openBuzzer(); 
+      callApi('openBuzzer').then(render); 
     }
 
-    // 판정 시 화면을 즉시 갱신하고 서버 통신 (0초 반응 체감)
     function judge(idx, res) { 
       const tbody = document.getElementById('buzz-list');
       if (tbody && tbody.rows[idx]) {
         tbody.rows[idx].cells[2].innerText = res; 
       }
-      google.script.run.withSuccessHandler(render).judgeStudent(idx, res); 
+      callApi('judgeStudent', { index: idx, result: res }).then(render); 
     }
 
     function nextQuiz() { 
       const banner = document.getElementById('status-banner');
       banner.className = "status-banner status-wait";
       banner.innerHTML = "🔒 다음 문제로 이동 중...";
-      google.script.run.withSuccessHandler(render).nextQuiz(); 
+      callApi('nextQuiz').then(render); 
     }
 
     function endLesson() { 
       if (confirm('수업을 종료하고 최종 결과를 보시겠습니까?')) {
-        google.script.run.withSuccessHandler(render).endLesson(); 
+        callApi('endLesson').then(render); 
       }
     }
 
     function resetAll() {
       if (confirm('모든 기록과 접속자 명단을 초기화하시겠습니까?')) {
-        google.script.run.withSuccessHandler(res => {
+        callApi('resetSystem').then(res => {
           render(res);
           startPolling(800);
-        }).resetSystem();
+        });
       }
     }
 
@@ -275,14 +301,13 @@
       buzzBtn.disabled = true;
       hasBuzzedCurrentQuiz = true;
 
-      google.script.run.withSuccessHandler(res => {
-        if (!res.success) alert(res.msg);
+      callApi('pressBuzzer', { nickname: myName }).then(res => {
+        if (res && !res.success && res.msg) alert(res.msg);
         fetchState();
-      }).pressBuzzer(myName);
+      });
     }
 
-    // 리포트 출력 (교사 vs 학생 분기 처리)
-    function showReport(history) {
+    function showReport(history = {}) {
       document.getElementById('lobby-sec').style.display = 'none';
       document.getElementById('app-sec').style.display = 'none';
       document.getElementById('report-sec').style.display = 'block';
@@ -290,7 +315,6 @@
       let html = "";
 
       if (isTeacher) {
-        // 교사 화면: 전체 결과 표시
         document.getElementById('teacher-report-ctrl').style.display = 'block';
         for (let q in history) {
           html += `<h3 style="margin-top:20px; text-align:left;">[문제 ${q}]</h3>
@@ -305,7 +329,6 @@
           html += `</table>`;
         }
       } else {
-        // 학생 화면: 개인 결과만 표시 (PDF 저장 버튼 없음)
         document.getElementById('teacher-report-ctrl').style.display = 'none';
         html += `<p style="font-size:18px; font-weight:bold; color:#0369a1;">👤 ${myName} 학생의 참여 기록</p>`;
         html += `<table><tr><th>문제 번호</th><th>내 순위</th><th>최종 판정</th></tr>`;
