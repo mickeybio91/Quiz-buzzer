@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    body { font-family: 'Apple SD Gothic Neo', Arial, sans-serif; text-align: center; padding: 20px; background: #f4f4f9; }
+    .card { background: white; padding: 25px; border-radius: 16px; box-shadow: 0 8px 16px rgba(0,0,0,0.12); max-width: 600px; margin: 0 auto; }
+    
+    input[type="text"], input[type="password"] {
+      width: 80%; padding: 12px; margin: 6px 0; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box;
+    }
+    
+    button { font-size: 16px; font-weight: bold; padding: 12px 20px; margin: 6px; border: none; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
+    button:active { transform: scale(0.96); }
+
+    .btn-open { background: #10b981; color: white; font-size: 18px; padding: 14px 24px; box-shadow: 0 4px 10px rgba(16,185,129,0.3); }
+    .btn-next { background: #3b82f6; color: white; }
+    .btn-end { background: #6b7280; color: white; }
+    .btn-reset { background: #dc2626; color: white; }
+    .btn-pass { background: #2563eb; color: white; padding: 6px 12px; font-size: 14px; }
+    .btn-fail { background: #f97316; color: white; padding: 6px 12px; font-size: 14px; }
+
+    .btn-main { background: #ef4444; color: white; font-size: 32px; width: 90%; height: 130px; border-radius: 65px; box-shadow: 0 8px 20px rgba(239,68,68,0.4); margin: 15px 0; }
+    .btn-main:disabled { background: #9ca3af !important; box-shadow: none !important; opacity: 0.6; cursor: not-allowed; }
+
+    .status-banner { padding: 16px; border-radius: 12px; font-size: 22px; font-weight: bold; margin: 15px 0; transition: all 0.3s; }
+    .status-wait { background: #e5e7eb; color: #4b5563; border: 2px solid #d1d5db; }
+    .status-active { 
+      background: #d1fae5; color: #065f46; border: 3px solid #10b981; 
+      animation: pulse 1.2s infinite alternate; 
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+      100% { transform: scale(1.02); box-shadow: 0 0 20px 10px rgba(16, 185, 129, 0); }
+    }
+
+    .user-tag { display: inline-block; background: #e0f2fe; color: #0369a1; font-weight: bold; padding: 6px 12px; border-radius: 20px; margin: 4px; font-size: 14px; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; }
+    th, td { border: 1px solid #e5e7eb; padding: 10px; text-align: center; }
+    th { background: #f3f4f6; color: #374151; }
+    .top1-row { background: #fef3c7; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <!-- 1. 로그인 화면 -->
+    <div id="login-sec">
+      <h2 style="color:#1f2937;">발표 부저 시스템</h2>
+      <input type="text" id="nickname" placeholder="닉네임 입력"><br>
+      <input type="password" id="pin" placeholder="교사 PIN (학생은 빈칸)"><br><br>
+      <button class="btn-open" onclick="login()">입장하기</button>
+    </div>
+
+    <!-- 2. 대기실 화면 (실시간 접속자 확인) -->
+    <div id="lobby-sec" style="display:none;">
+      <h2>📢 대기실</h2>
+      <p style="color:#6b7280;">선생님이 수업을 시작할 때까지 기다려주세요.</p>
+      
+      <div id="teacher-start-ctrl" style="display:none; margin-bottom: 20px;">
+        <button class="btn-open" onclick="startLesson()">🚀 수업 시작하기</button>
+        <button class="btn-reset" onclick="resetAll()">🔄 초기화</button>
+      </div>
+
+      <h4>👥 현재 접속자 명단 (<span id="user-count">0</span>명)</h4>
+      <div id="user-list" style="text-align:center; min-height: 80px; padding: 10px; border: 1px solid #e5e7eb; border-radius: 8px;"></div>
+    </div>
+
+    <!-- 3. 메인 부저 진행 화면 -->
+    <div id="app-sec" style="display:none;">
+      <h2 id="quiz-title" style="margin-bottom:5px;">문제 1</h2>
+
+      <div id="status-banner" class="status-banner status-wait">
+        🔒 부저 대기 중입니다
+      </div>
+
+      <!-- 교사 조작부 -->
+      <div id="teacher-ctrl" style="display:none;">
+        <button class="btn-open" onclick="openBuzzer()">🔔 부저 오픈!</button>
+        <button class="btn-next" onclick="nextQuiz()">다음 문제 ➔</button>
+        <button class="btn-end" onclick="endLesson()">수업 종료</button>
+        <button class="btn-reset" onclick="resetAll()">🔄 수업 초기화</button>
+      </div>
+
+      <!-- 학생 부저 버튼 -->
+      <div id="student-ctrl" style="display:none;">
+        <button class="btn-main" id="buzz-btn" onclick="pressBuzzer()" disabled>CLICK!</button>
+      </div>
+
+      <!-- 실시간 순위 표 -->
+      <h4 style="margin-top:25px; margin-bottom:10px; text-align:left; color:#374151;">⚡ 실시간 선착순 명단</h4>
+      <table>
+        <thead>
+          <tr><th>순위</th><th>닉네임</th><th>판정</th><th id="th-ctrl" style="display:none;">교사 판정</th></tr>
+        </thead>
+        <tbody id="buzz-list"></tbody>
+      </table>
+    </div>
+
+    <!-- 4. 최종 요약 리포트 -->
+    <div id="report-sec" style="display:none;">
+      <h2>🎉 최종 수업 결과 리포트</h2>
+      <div id="report-content"></div>
+      <br>
+      <!-- 교사 전용 버튼 -->
+      <div id="teacher-report-ctrl" style="display:none;">
+        <button class="btn-open" onclick="downloadPDF()">PDF 저장하기</button>
+        <button class="btn-reset" onclick="resetAll()">🔄 다시 시작하기</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let myName = "";
+    let isTeacher = false;
+    let timer = null;
+    let currentInterval = 2500;
+    let hasBuzzedCurrentQuiz = false;
+
+    function login() {
+      myName = document.getElementById('nickname').value.trim();
+      const pin = document.getElementById('pin').value;
+      if (!myName) return alert('닉네임을 입력하세요.');
+
+      if (pin === "1234") isTeacher = true;
+
+      document.getElementById('login-sec').style.display = 'none';
+
+      // 유저 등록 및 대기실 상태 가져오기
+      google.script.run.withSuccessHandler(render).joinUser(myName);
+      startPolling(800);
+    }
+
+    function startPolling(intervalMs) {
+      if (timer) clearInterval(timer);
+      currentInterval = intervalMs;
+      timer = setInterval(fetchState, intervalMs);
+    }
+
+    function fetchState() {
+      google.script.run.withSuccessHandler(render).getState();
+    }
+
+    function render(state) {
+      // 1. 수업 종료 처리
+      if (state.status === 'END') {
+        if (timer) clearInterval(timer);
+        showReport(state.history);
+        return;
+      }
+
+      // 2. 대기실(LOBBY) 상태 렌더링
+      if (state.status === 'LOBBY') {
+        document.getElementById('lobby-sec').style.display = 'block';
+        document.getElementById('app-sec').style.display = 'none';
+        document.getElementById('report-sec').style.display = 'none';
+
+        if (isTeacher) {
+          document.getElementById('teacher-start-ctrl').style.display = 'block';
+        }
+
+        document.getElementById('user-count').innerText = state.users.length;
+        const userListDiv = document.getElementById('user-list');
+        userListDiv.innerHTML = '';
+        state.users.forEach(u => {
+          userListDiv.innerHTML += `<span class="user-tag">👤 ${u}</span>`;
+        });
+        return;
+      }
+
+      // 3. 수업 진행(WAIT / OPEN) 상태 렌더링
+      document.getElementById('lobby-sec').style.display = 'none';
+      document.getElementById('app-sec').style.display = 'block';
+      document.getElementById('report-sec').style.display = 'none';
+
+      if (isTeacher) {
+        document.getElementById('teacher-ctrl').style.display = 'block';
+        document.getElementById('th-ctrl').style.display = 'table-cell';
+      } else {
+        document.getElementById('student-ctrl').style.display = 'block';
+      }
+
+      document.getElementById('quiz-title').innerText = `문제 ${state.quizNum}`;
+      const banner = document.getElementById('status-banner');
+      const buzzBtn = document.getElementById('buzz-btn');
+
+      if (state.status === 'OPEN') {
+        banner.className = "status-banner status-active";
+        banner.innerHTML = "🔔 부저 오픈! 지금 누르세요!!";
+        
+        if (!isTeacher && !hasBuzzedCurrentQuiz) {
+          buzzBtn.disabled = false;
+        }
+        if (currentInterval !== 500) startPolling(500);
+      } else {
+        banner.className = "status-banner status-wait";
+        banner.innerHTML = "🔒 부저 대기 중입니다";
+        
+        if (!isTeacher) buzzBtn.disabled = true;
+        hasBuzzedCurrentQuiz = false;
+        
+        // 반응 속도 향상을 위해 대기 상태 폴링 간격을 1초(1000ms)로 단축
+        if (currentInterval !== 1000) startPolling(1000);
+      }
+
+      const tbody = document.getElementById('buzz-list');
+      tbody.innerHTML = '';
+      state.buzzes.forEach((b, idx) => {
+        let actionBtns = '';
+        if (isTeacher) {
+          actionBtns = `<button class="btn-pass" onclick="judge(${idx}, 'PASS')">PASS</button>
+                        <button class="btn-fail" onclick="judge(${idx}, 'FAIL')">FAIL</button>`;
+        }
+        
+        const isTop1 = (idx === 0) ? 'class="top1-row"' : '';
+        const rankText = (idx === 0) ? '🏆 1등' : `${idx + 1}`;
+
+        let rowHtml = `<tr ${isTop1}>
+          <td>${rankText}</td>
+          <td>${b.nickname}</td>
+          <td>${b.result}</td>`;
+        if (isTeacher) rowHtml += `<td>${actionBtns}</td>`;
+        rowHtml += `</tr>`;
+
+        tbody.innerHTML += rowHtml;
+      });
+    }
+
+    function startLesson() {
+      google.script.run.withSuccessHandler(render).startLesson();
+    }
+
+    function openBuzzer() { 
+      const banner = document.getElementById('status-banner');
+      banner.className = "status-banner status-active";
+      banner.innerHTML = "🔔 부저 오픈! (전송 중...)";
+      google.script.run.withSuccessHandler(render).openBuzzer(); 
+    }
+
+    // 판정 시 화면을 즉시 갱신하고 서버 통신 (0초 반응 체감)
+    function judge(idx, res) { 
+      const tbody = document.getElementById('buzz-list');
+      if (tbody && tbody.rows[idx]) {
+        tbody.rows[idx].cells[2].innerText = res; 
+      }
+      google.script.run.withSuccessHandler(render).judgeStudent(idx, res); 
+    }
+
+    function nextQuiz() { 
+      const banner = document.getElementById('status-banner');
+      banner.className = "status-banner status-wait";
+      banner.innerHTML = "🔒 다음 문제로 이동 중...";
+      google.script.run.withSuccessHandler(render).nextQuiz(); 
+    }
+
+    function endLesson() { 
+      if (confirm('수업을 종료하고 최종 결과를 보시겠습니까?')) {
+        google.script.run.withSuccessHandler(render).endLesson(); 
+      }
+    }
+
+    function resetAll() {
+      if (confirm('모든 기록과 접속자 명단을 초기화하시겠습니까?')) {
+        google.script.run.withSuccessHandler(res => {
+          render(res);
+          startPolling(800);
+        }).resetSystem();
+      }
+    }
+
+    function pressBuzzer() {
+      const buzzBtn = document.getElementById('buzz-btn');
+      buzzBtn.disabled = true;
+      hasBuzzedCurrentQuiz = true;
+
+      google.script.run.withSuccessHandler(res => {
+        if (!res.success) alert(res.msg);
+        fetchState();
+      }).pressBuzzer(myName);
+    }
+
+    // 리포트 출력 (교사 vs 학생 분기 처리)
+    function showReport(history) {
+      document.getElementById('lobby-sec').style.display = 'none';
+      document.getElementById('app-sec').style.display = 'none';
+      document.getElementById('report-sec').style.display = 'block';
+      
+      let html = "";
+
+      if (isTeacher) {
+        // 교사 화면: 전체 결과 표시
+        document.getElementById('teacher-report-ctrl').style.display = 'block';
+        for (let q in history) {
+          html += `<h3 style="margin-top:20px; text-align:left;">[문제 ${q}]</h3>
+          <table><tr><th>순위</th><th>닉네임</th><th>결과</th></tr>`;
+          if (history[q].length === 0) {
+            html += `<tr><td colspan="3">참가자 없음</td></tr>`;
+          } else {
+            history[q].forEach((b, idx) => {
+              html += `<tr><td>${idx + 1}</td><td>${b.nickname}</td><td>${b.result}</td></tr>`;
+            });
+          }
+          html += `</table>`;
+        }
+      } else {
+        // 학생 화면: 개인 결과만 표시 (PDF 저장 버튼 없음)
+        document.getElementById('teacher-report-ctrl').style.display = 'none';
+        html += `<p style="font-size:18px; font-weight:bold; color:#0369a1;">👤 ${myName} 학생의 참여 기록</p>`;
+        html += `<table><tr><th>문제 번호</th><th>내 순위</th><th>최종 판정</th></tr>`;
+        
+        let participated = false;
+        for (let q in history) {
+          const myIndex = history[q].findIndex(b => b.nickname === myName);
+          if (myIndex !== -1) {
+            participated = true;
+            const myRecord = history[q][myIndex];
+            html += `<tr>
+              <td>문제 ${q}</td>
+              <td>${myIndex + 1}등</td>
+              <td>${myRecord.result}</td>
+            </tr>`;
+          }
+        }
+        if (!participated) {
+          html += `<tr><td colspan="3">부저를 누른 기록이 없습니다.</td></tr>`;
+        }
+        html += `</table>`;
+      }
+
+      document.getElementById('report-content').innerHTML = html;
+    }
+
+    function downloadPDF() {
+      const element = document.getElementById('report-content');
+      html2pdf().from(element).save('수업_발표_결과.pdf');
+    }
+  </script>
+</body>
+</html>
